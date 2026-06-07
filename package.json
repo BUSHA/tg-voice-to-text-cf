@@ -1,0 +1,17 @@
+{
+  "name": "telegram-voice-transcriber",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "typecheck": "tsc --noEmit",
+    "types": "wrangler types",
+    "verify": "npm run types && npm run typecheck && wrangler deploy --dry-run"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.2",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.50.0"
+  }
+}

@@ -13,10 +13,15 @@ const DAILY_LIMIT_MESSAGE =
   "The daily transcription limit has been reached. Please try again after 00:00 UTC.";
 const NOT_ALLOWED_MESSAGE =
   "This chat is not allowed to use voice transcription.";
+const GUEST_NOT_ALLOWED_MESSAGE =
+  "You are not allowed to use voice transcription.";
+const GUEST_HELP_MESSAGE =
+  "Reply to a voice or audio message when mentioning me, and I’ll transcribe it.";
 const TELEGRAM_MESSAGE_LIMIT = 4096;
 
 interface TelegramUpdate {
   message?: TelegramMessage;
+  guest_message?: TelegramMessage;
 }
 
 interface TelegramMessage {
@@ -27,8 +32,11 @@ interface TelegramMessage {
     type: "private" | "group" | "supergroup" | "channel";
   };
   from?: {
+    id: number;
     is_bot?: boolean;
   };
+  guest_query_id?: string;
+  reply_to_message?: TelegramMessage;
   voice?: TelegramMedia;
   audio?: TelegramMedia;
 }
@@ -47,6 +55,19 @@ interface TelegramApiResponse<T> {
 
 interface TelegramFile {
   file_path?: string;
+}
+
+interface TelegramBot {
+  id: number;
+  username?: string;
+  supports_guest_queries?: boolean;
+}
+
+interface TelegramWebhookInfo {
+  allowed_updates?: string[];
+  last_error_message?: string;
+  pending_update_count: number;
+  url: string;
 }
 
 interface RuntimeConfig {
@@ -107,12 +128,21 @@ export default {
       return new Response("OK");
     }
 
-    ctx.waitUntil(handleUpdate(update, env));
+    ctx.waitUntil(handleUpdate(update, env, request.url));
     return new Response("OK");
   },
 } satisfies ExportedHandler<Cloudflare.Env>;
 
-async function handleUpdate(update: TelegramUpdate, env: Cloudflare.Env): Promise<void> {
+async function handleUpdate(
+  update: TelegramUpdate,
+  env: Cloudflare.Env,
+  webhookUrl: string,
+): Promise<void> {
+  if (update.guest_message) {
+    await handleGuestMessage(update.guest_message, env);
+    return;
+  }
+
   const message = update.message;
   if (!message || message.from?.is_bot) {
     return;
@@ -162,6 +192,39 @@ async function handleUpdate(update: TelegramUpdate, env: Cloudflare.Env): Promis
       await sendMessage(env, message.chat.id, formatBudgetStats(stats), message.message_id);
     } catch (error) {
       logError("Failed to retrieve daily budget stats", error);
+      await safelySendMessage(env, message.chat.id, TEMPORARY_ERROR_MESSAGE, message.message_id);
+    }
+    return;
+  }
+
+  if (message.text?.match(/^\/setupguest(?:@\w+)?$/)) {
+    try {
+      await setTelegramWebhook(env, webhookUrl);
+      const status = await getTelegramGuestStatus(env);
+      await sendMessage(
+        env,
+        message.chat.id,
+        formatTelegramGuestStatus(status),
+        message.message_id,
+      );
+    } catch (error) {
+      logError("Failed to enable Telegram guest updates", error);
+      await safelySendMessage(env, message.chat.id, TEMPORARY_ERROR_MESSAGE, message.message_id);
+    }
+    return;
+  }
+
+  if (message.text?.match(/^\/gueststatus(?:@\w+)?$/)) {
+    try {
+      const status = await getTelegramGuestStatus(env);
+      await sendMessage(
+        env,
+        message.chat.id,
+        formatTelegramGuestStatus(status),
+        message.message_id,
+      );
+    } catch (error) {
+      logError("Failed to retrieve Telegram guest status", error);
       await safelySendMessage(env, message.chat.id, TEMPORARY_ERROR_MESSAGE, message.message_id);
     }
     return;
@@ -224,6 +287,85 @@ async function handleUpdate(update: TelegramUpdate, env: Cloudflare.Env): Promis
 
     logError("Voice transcription failed", error);
     await safelySendMessage(env, message.chat.id, TEMPORARY_ERROR_MESSAGE, message.message_id);
+  }
+}
+
+async function handleGuestMessage(
+  message: TelegramMessage,
+  env: Cloudflare.Env,
+): Promise<void> {
+  const guestQueryId = message.guest_query_id;
+  if (!guestQueryId || message.from?.is_bot) {
+    return;
+  }
+
+  const config = getRuntimeConfig(env);
+  const callerId = message.from?.id;
+  if (callerId === undefined || !isAllowedChat(config.allowedChatIds, callerId)) {
+    console.warn({
+      message: "Rejected guest query from a user that is not allowlisted",
+      callerId,
+      chatId: message.chat.id,
+      chatType: message.chat.type,
+    });
+    await safelyAnswerGuestQuery(env, guestQueryId, GUEST_NOT_ALLOWED_MESSAGE);
+    return;
+  }
+
+  const media = message.reply_to_message?.voice ?? message.reply_to_message?.audio;
+  if (!media) {
+    await safelyAnswerGuestQuery(env, guestQueryId, GUEST_HELP_MESSAGE);
+    return;
+  }
+
+  console.info({
+    message: "Received transcribable Telegram guest query",
+    callerId,
+    chatId: message.chat.id,
+    chatType: message.chat.type,
+    durationSeconds: media.duration,
+  });
+
+  if (
+    (media.file_size !== undefined && media.file_size > config.maxFileSizeBytes) ||
+    (media.duration !== undefined && media.duration > config.maxDurationSeconds)
+  ) {
+    await safelyAnswerGuestQuery(env, guestQueryId, TOO_LARGE_MESSAGE);
+    return;
+  }
+
+  try {
+    const reservationSeconds = media.duration ?? config.maxDurationSeconds;
+    const reservation = await reserveDailyBudget(
+      env,
+      reservationSeconds,
+      config.dailyTranscriptionSeconds,
+    );
+    if (!reservation.allowed) {
+      await safelyAnswerGuestQuery(env, guestQueryId, DAILY_LIMIT_MESSAGE);
+      return;
+    }
+
+    const file = await getTelegramFile(env, media.file_id);
+    if (!file.file_path) {
+      throw new TelegramApiError("Telegram getFile response did not include file_path");
+    }
+
+    const audio = await downloadTelegramFile(env, file.file_path, config.maxFileSizeBytes);
+    const text = await transcribeAudio(env, audio, config);
+    await answerGuestQuery(
+      env,
+      guestQueryId,
+      text ? `📝 ${text}` : EMPTY_TRANSCRIPTION_MESSAGE,
+    );
+  } catch (error) {
+    if (error instanceof RangeError) {
+      await safelyAnswerGuestQuery(env, guestQueryId, TOO_LARGE_MESSAGE);
+      return;
+    }
+
+    logError("Guest voice transcription failed", error);
+    await safelyAnswerGuestQuery(env, guestQueryId, TEMPORARY_ERROR_MESSAGE);
   }
 }
 
@@ -382,6 +524,76 @@ async function safelySendMessage(
     await sendMessage(env, chatId, text, replyToMessageId);
   } catch (error) {
     logError("Failed to send Telegram message", error);
+  }
+}
+
+async function setTelegramWebhook(env: Cloudflare.Env, webhookUrl: string): Promise<void> {
+  await telegramApi(env, "setWebhook", {
+    url: webhookUrl,
+    allowed_updates: ["message", "guest_message"],
+  });
+}
+
+async function getTelegramGuestStatus(
+  env: Cloudflare.Env,
+): Promise<{ bot: TelegramBot; webhook: TelegramWebhookInfo }> {
+  const [bot, webhook] = await Promise.all([
+    telegramApi<TelegramBot>(env, "getMe", {}),
+    telegramApi<TelegramWebhookInfo>(env, "getWebhookInfo", {}),
+  ]);
+  return { bot, webhook };
+}
+
+function formatTelegramGuestStatus({
+  bot,
+  webhook,
+}: {
+  bot: TelegramBot;
+  webhook: TelegramWebhookInfo;
+}): string {
+  const allowedUpdates = webhook.allowed_updates?.join(", ") || "all default updates";
+  return [
+    `Bot: @${bot.username ?? "unknown"}`,
+    `Guest Mode capability: ${bot.supports_guest_queries === true ? "enabled" : "NOT enabled"}`,
+    `Webhook guest_message subscription: ${
+      webhook.allowed_updates?.includes("guest_message") ? "enabled" : "NOT enabled"
+    }`,
+    `Webhook updates: ${allowedUpdates}`,
+    `Pending updates: ${webhook.pending_update_count}`,
+    ...(webhook.last_error_message
+      ? [`Last webhook error: ${webhook.last_error_message}`]
+      : []),
+  ].join("\n");
+}
+
+async function answerGuestQuery(
+  env: Cloudflare.Env,
+  guestQueryId: string,
+  text: string,
+): Promise<void> {
+  const messageText = splitTelegramText(text, TELEGRAM_MESSAGE_LIMIT)[0];
+  await telegramApi(env, "answerGuestQuery", {
+    guest_query_id: guestQueryId,
+    result: {
+      type: "article",
+      id: "voice-transcription",
+      title: "Voice transcription",
+      input_message_content: {
+        message_text: messageText,
+      },
+    },
+  });
+}
+
+async function safelyAnswerGuestQuery(
+  env: Cloudflare.Env,
+  guestQueryId: string,
+  text: string,
+): Promise<void> {
+  try {
+    await answerGuestQuery(env, guestQueryId, text);
+  } catch (error) {
+    logError("Failed to answer Telegram guest query", error);
   }
 }
 

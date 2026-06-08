@@ -3,3 +3,4 @@ node_modules/
 .wrangler/
 worker-configuration.d.ts
 *.cpuprofile
+wrangler.jsonc

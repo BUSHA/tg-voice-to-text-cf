@@ -8,6 +8,7 @@ API token.
 ## Behavior
 
 - Handles Telegram `message.voice` and `message.audio`.
+- Handles Guest Mode mentions that reply to a voice or audio message.
 - Ignores bot messages.
 - Replies to unsupported messages only in private chats.
 - Rejects oversized or overlong audio before transcription.
@@ -93,8 +94,8 @@ Allowed chats can send `/stats` to see the bot's reserved minutes used,
 remaining minutes, daily limit, and UTC reset time. The command is ignored in
 non-allowlisted chats and does not invoke Workers AI.
 
-To restrict the bot to specific personal chats, groups, or supergroups, set
-their numeric IDs in `wrangler.jsonc`:
+To restrict the bot to specific users, personal chats, groups, or supergroups,
+set their numeric IDs in `wrangler.jsonc`:
 
 ```jsonc
 "ALLOWED_CHAT_IDS": "123456789,-1001234567890"
@@ -104,6 +105,22 @@ Positive IDs are usually private chats. Group and supergroup IDs are usually
 negative. The easiest way to discover one is to send `/chatid` in that personal
 chat or group. The bot replies with its numeric ID. This command works even
 when a group is not yet allowlisted.
+
+With Guest Mode enabled in BotFather, an allowlisted user can mention the bot
+while replying to a voice or audio message in any supported chat. Guest
+requests are authorized using the tagging user's positive ID, not the current
+chat ID. Users who are not allowlisted receive an access-denied guest reply,
+and their audio is never downloaded or transcribed. Telegram allows only one
+reply to a guest query, so guest transcriptions longer than 4096 characters are
+truncated to the first message-sized chunk.
+
+After enabling Guest Mode, send `/setupguest` from an allowlisted chat once.
+This refreshes the existing webhook subscription so Telegram delivers both
+normal `message` and the newer `guest_message` update types. The command reuses
+the secret webhook URL from the incoming command and does not expose it. It
+also reports whether Telegram's `getMe` API confirms that Guest Mode is enabled
+for the bot. Send `/gueststatus` from an allowlisted chat to retrieve the same
+diagnostic status without changing the webhook.
 
 Set `ALLOW_PRIVATE_CHATS` to `false` to silently ignore every personal message
 from users whose positive private chat ID is not in `ALLOWED_CHAT_IDS`.
@@ -152,7 +169,8 @@ curl "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook?url=https://<w
 ```
 
 Do not commit or share the resulting URL because it contains the webhook
-secret.
+secret. Alternatively, after this initial webhook is configured, the
+allowlisted `/setupguest` command can refresh its update subscription.
 
 ## Enable Group Chats
 
@@ -186,6 +204,8 @@ of its messages.
 4. After completing **Enable Group Chats**, send a voice message in a group and
    confirm the bot replies with text.
 5. Send a non-voice message in a group and confirm the bot stays silent.
+6. In a chat where the bot is not a member, reply to a voice message, mention
+   the bot, and confirm an allowlisted user receives the transcription.
 
 For local development, create an ignored `.dev.vars` file with
 `TELEGRAM_BOT_TOKEN` and `WEBHOOK_SECRET`, then run `npm run dev`. Workers AI

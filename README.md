@@ -58,6 +58,7 @@ Non-secret settings live under `vars` in `wrangler.jsonc`:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
+| `ALLOW_PRIVATE_CHATS` | `false` | Ignore unlisted private chats when false |
 | `ALLOWED_CHAT_IDS` | empty | Comma-separated allowed Telegram chat IDs; empty allows all |
 | `DAILY_TRANSCRIPTION_SECONDS` | `6000` | Daily budget in seconds, reset at 00:00 UTC |
 | `DEFAULT_LANGUAGE` | `uk` | Preferred ISO 639-1 language; empty means auto-detect |
@@ -88,6 +89,10 @@ Object and resets at 00:00 UTC. This protects this bot's usage. It cannot
 account for Workers AI usage from other Workers in the same Cloudflare account,
 so leave additional headroom if the account runs other AI workloads.
 
+Allowed chats can send `/stats` to see the bot's reserved minutes used,
+remaining minutes, daily limit, and UTC reset time. The command is ignored in
+non-allowlisted chats and does not invoke Workers AI.
+
 To restrict the bot to specific personal chats, groups, or supergroups, set
 their numeric IDs in `wrangler.jsonc`:
 
@@ -98,7 +103,12 @@ their numeric IDs in `wrangler.jsonc`:
 Positive IDs are usually private chats. Group and supergroup IDs are usually
 negative. The easiest way to discover one is to send `/chatid` in that personal
 chat or group. The bot replies with its numeric ID. This command works even
-when the chat is not yet allowlisted.
+when a group is not yet allowlisted.
+
+Set `ALLOW_PRIVATE_CHATS` to `false` to silently ignore every personal message
+from users whose positive private chat ID is not in `ALLOWED_CHAT_IDS`.
+Explicitly allowlisted private chats remain usable. When private chats are
+disabled, `/chatid` is also ignored for unlisted personal chats.
 
 You can also temporarily leave `ALLOWED_CHAT_IDS` empty, send a voice message
 in the chat, then inspect structured Worker logs:
@@ -107,8 +117,9 @@ in the chat, then inspect structured Worker logs:
 npx wrangler tail
 ```
 
-After adding the IDs, deploy again. Messages from non-allowlisted chats are
-silently ignored and logged without invoking Workers AI.
+After adding the IDs, deploy again. Voice/audio messages from non-allowlisted
+chats receive an access-denied reply without invoking Workers AI. Other
+messages from those chats are silently ignored and logged.
 
 ## Verify And Deploy
 

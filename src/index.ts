@@ -11,6 +11,8 @@ const TEMPORARY_ERROR_MESSAGE =
   "Sorry, I couldn’t transcribe this voice message. Please try again.";
 const DAILY_LIMIT_MESSAGE =
   "The daily transcription limit has been reached. Please try again after 00:00 UTC.";
+const NOT_ALLOWED_MESSAGE =
+  "This chat is not allowed to use voice transcription.";
 const TELEGRAM_MESSAGE_LIMIT = 4096;
 
 interface TelegramUpdate {
@@ -48,6 +50,7 @@ interface TelegramFile {
 }
 
 interface RuntimeConfig {
+  allowPrivateChats: boolean;
   allowedChatIds: Set<string>;
   dailyTranscriptionSeconds: number;
   maxFileSizeBytes: number;
@@ -60,6 +63,13 @@ interface BudgetReservation {
   allowed: boolean;
   limitSeconds: number;
   reservedSeconds: number;
+}
+
+interface BudgetStats {
+  limitSeconds: number;
+  remainingSeconds: number;
+  reservedSeconds: number;
+  utcDate: string;
 }
 
 class TelegramApiError extends Error {
@@ -109,6 +119,21 @@ async function handleUpdate(update: TelegramUpdate, env: Cloudflare.Env): Promis
   }
 
   const config = getRuntimeConfig(env);
+  if (
+    message.chat.type === "private" &&
+    !config.allowPrivateChats &&
+    !config.allowedChatIds.has(String(message.chat.id))
+  ) {
+    console.warn({
+      message: "Ignored update from a private chat",
+      chatId: message.chat.id,
+    });
+    if (message.voice || message.audio) {
+      await safelySendMessage(env, message.chat.id, NOT_ALLOWED_MESSAGE, message.message_id);
+    }
+    return;
+  }
+
   if (message.text?.match(/^\/chatid(?:@\w+)?$/)) {
     await safelySendMessage(
       env,
@@ -125,6 +150,20 @@ async function handleUpdate(update: TelegramUpdate, env: Cloudflare.Env): Promis
       chatId: message.chat.id,
       chatType: message.chat.type,
     });
+    if (message.voice || message.audio) {
+      await safelySendMessage(env, message.chat.id, NOT_ALLOWED_MESSAGE, message.message_id);
+    }
+    return;
+  }
+
+  if (message.text?.match(/^\/stats(?:@\w+)?$/)) {
+    try {
+      const stats = await getDailyBudgetStats(env, config.dailyTranscriptionSeconds);
+      await sendMessage(env, message.chat.id, formatBudgetStats(stats), message.message_id);
+    } catch (error) {
+      logError("Failed to retrieve daily budget stats", error);
+      await safelySendMessage(env, message.chat.id, TEMPORARY_ERROR_MESSAGE, message.message_id);
+    }
     return;
   }
 
@@ -190,6 +229,7 @@ async function handleUpdate(update: TelegramUpdate, env: Cloudflare.Env): Promis
 
 function getRuntimeConfig(env: Cloudflare.Env): RuntimeConfig {
   return {
+    allowPrivateChats: parseBoolean(env.ALLOW_PRIVATE_CHATS, true),
     allowedChatIds: parseAllowedChatIds(env.ALLOWED_CHAT_IDS),
     dailyTranscriptionSeconds: parsePositiveInteger(
       env.DAILY_TRANSCRIPTION_SECONDS,
@@ -200,6 +240,17 @@ function getRuntimeConfig(env: Cloudflare.Env): RuntimeConfig {
     language: env.DEFAULT_LANGUAGE?.trim() || undefined,
     model: env.WHISPER_MODEL?.trim() || "@cf/openai/whisper-large-v3-turbo",
   };
+}
+
+function parseBoolean(value: string | undefined, fallback: boolean): boolean {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === "true") {
+    return true;
+  }
+  if (normalized === "false") {
+    return false;
+  }
+  return fallback;
 }
 
 function parseAllowedChatIds(value: string | undefined): Set<string> {
@@ -227,6 +278,29 @@ async function reserveDailyBudget(
 ): Promise<BudgetReservation> {
   const budget = env.DAILY_BUDGET.getByName("global");
   return budget.reserve(getUtcDate(), requestedSeconds, limitSeconds);
+}
+
+async function getDailyBudgetStats(
+  env: Cloudflare.Env,
+  limitSeconds: number,
+): Promise<BudgetStats> {
+  const budget = env.DAILY_BUDGET.getByName("global");
+  return budget.stats(getUtcDate(), limitSeconds);
+}
+
+function formatBudgetStats(stats: BudgetStats): string {
+  return [
+    `Daily transcription usage (${stats.utcDate} UTC):`,
+    `Used: ${formatMinutes(stats.reservedSeconds)}`,
+    `Remaining: ${formatMinutes(stats.remainingSeconds)}`,
+    `Limit: ${formatMinutes(stats.limitSeconds)}`,
+    "Resets at 00:00 UTC.",
+  ].join("\n");
+}
+
+function formatMinutes(seconds: number): string {
+  const minutes = seconds / 60;
+  return `${Number.isInteger(minutes) ? minutes : minutes.toFixed(1)} minutes`;
 }
 
 function getUtcDate(now = new Date()): string {
@@ -461,5 +535,27 @@ export class DailyBudget extends DurableObject<Cloudflare.Env> {
       limitSeconds: safeLimitSeconds,
       reservedSeconds,
     };
+  }
+
+  stats(utcDate: string, limitSeconds: number): BudgetStats {
+    const safeLimitSeconds = Math.max(1, Math.floor(limitSeconds));
+    const reservedSeconds = this.getReservedSeconds(utcDate);
+    return {
+      utcDate,
+      limitSeconds: safeLimitSeconds,
+      reservedSeconds,
+      remainingSeconds: Math.max(0, safeLimitSeconds - reservedSeconds),
+    };
+  }
+
+  private getReservedSeconds(utcDate: string): number {
+    return (
+      this.ctx.storage.sql
+        .exec<{ reserved_seconds: number }>(
+          "SELECT reserved_seconds FROM daily_budget WHERE utc_date = ?",
+          utcDate,
+        )
+        .toArray()[0]?.reserved_seconds ?? 0
+    );
   }
 }

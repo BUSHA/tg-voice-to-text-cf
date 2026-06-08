@@ -22,6 +22,7 @@
     }
   ],
   "vars": {
+    "ALLOW_PRIVATE_CHATS": "false",
     "ALLOWED_CHAT_IDS": "",
     "DAILY_TRANSCRIPTION_SECONDS": "6000",
     "DEFAULT_LANGUAGE": "uk",

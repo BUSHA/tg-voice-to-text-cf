@@ -103,8 +103,8 @@ set their numeric IDs in `wrangler.jsonc`:
 
 Positive IDs are usually private chats. Group and supergroup IDs are usually
 negative. The easiest way to discover one is to send `/chatid` in that personal
-chat or group. The bot replies with its numeric ID. This command works even
-when a group is not yet allowlisted.
+chat or group. The bot replies with its numeric ID. This command works for every
+user, even when the chat is not allowlisted or private chats are disabled.
 
 With Guest Mode enabled in BotFather, an allowlisted user can mention the bot
 while replying to a voice or audio message in any supported chat. Guest
@@ -124,8 +124,8 @@ diagnostic status without changing the webhook.
 
 Set `ALLOW_PRIVATE_CHATS` to `false` to silently ignore every personal message
 from users whose positive private chat ID is not in `ALLOWED_CHAT_IDS`.
-Explicitly allowlisted private chats remain usable. When private chats are
-disabled, `/chatid` is also ignored for unlisted personal chats.
+Explicitly allowlisted private chats remain usable. `/chatid` remains available
+to every user.
 
 You can also temporarily leave `ALLOWED_CHAT_IDS` empty, send a voice message
 in the chat, then inspect structured Worker logs:

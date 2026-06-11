@@ -148,6 +148,16 @@ async function handleUpdate(
     return;
   }
 
+  if (message.text?.match(/^\/chatid(?:@\w+)?$/)) {
+    await safelySendMessage(
+      env,
+      message.chat.id,
+      `Chat ID: ${message.chat.id}`,
+      message.message_id,
+    );
+    return;
+  }
+
   const config = getRuntimeConfig(env);
   if (
     message.chat.type === "private" &&
@@ -161,16 +171,6 @@ async function handleUpdate(
     if (message.voice || message.audio) {
       await safelySendMessage(env, message.chat.id, NOT_ALLOWED_MESSAGE, message.message_id);
     }
-    return;
-  }
-
-  if (message.text?.match(/^\/chatid(?:@\w+)?$/)) {
-    await safelySendMessage(
-      env,
-      message.chat.id,
-      `Chat ID: ${message.chat.id}`,
-      message.message_id,
-    );
     return;
   }
 

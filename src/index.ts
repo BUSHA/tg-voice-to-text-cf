@@ -12,9 +12,9 @@ const TEMPORARY_ERROR_MESSAGE =
 const DAILY_LIMIT_MESSAGE =
   "The daily transcription limit has been reached. Please try again after 00:00 UTC.";
 const NOT_ALLOWED_MESSAGE =
-  "This chat is not allowed to use voice transcription.";
+  "This chat is not allowed to use voice transcription in this bot. Feel free to deploy your own: https://github.com/BUSHA/tg-voice-to-text-cf";
 const GUEST_NOT_ALLOWED_MESSAGE =
-  "You are not allowed to use voice transcription.";
+  "You are not allowed to use voice transcription in this bot. Feel free to deploy your own: https://github.com/BUSHA/tg-voice-to-text-cf";
 const GUEST_HELP_MESSAGE =
   "Reply to a voice or audio message when mentioning me, and I’ll transcribe it.";
 const TELEGRAM_MESSAGE_LIMIT = 4096;

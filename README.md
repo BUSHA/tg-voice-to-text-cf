@@ -1,41 +1,42 @@
-# Telegram Voice Transcriber
+# Розпізнавач голосових повідомлень Telegram
 
-A Cloudflare Worker that receives Telegram voice messages, sends the original
-`.ogg`/Opus audio directly to Cloudflare Workers AI Whisper, and replies with
-the transcription. It uses no separate server, database, queue, or Cloudflare
-API token.
+Cloudflare Worker, який отримує голосові повідомлення Telegram, надсилає
+оригінальне аудіо `.ogg`/Opus безпосередньо до Cloudflare Workers AI Whisper і
+відповідає розпізнаним текстом. Він не потребує окремого сервера, бази даних,
+черги або токена Cloudflare API.
 
-## Behavior
+## Поведінка
 
-- Handles Telegram `message.voice` and `message.audio`.
-- Handles Guest Mode mentions that reply to a voice or audio message.
-- Ignores bot messages.
-- Replies to unsupported messages only in private chats.
-- Rejects oversized or overlong audio before transcription.
-- Restricts usage to an optional allowlist of Telegram chat IDs.
-- Enforces an atomic daily transcription budget using a SQLite-backed Durable
-  Object.
-- Acknowledges webhooks immediately and finishes transcription with
-  `ctx.waitUntil()` to avoid Telegram retries.
-- Replies to the original message and splits transcriptions that exceed
-  Telegram's 4096-character message limit.
+- Обробляє Telegram `message.voice` і `message.audio`.
+- Обробляє згадки у гостьовому режимі, зроблені у відповіді на голосове або
+  аудіоповідомлення.
+- Ігнорує повідомлення ботів.
+- Відповідає на непідтримувані повідомлення лише у приватних чатах.
+- Відхиляє завеликі або задовгі аудіо до початку розпізнавання.
+- Обмежує використання необов'язковим списком дозволених ID чатів Telegram.
+- Забезпечує атомарний денний ліміт розпізнавання за допомогою Durable Object
+  на основі SQLite.
+- Негайно підтверджує отримання вебхуків і завершує розпізнавання через
+  `ctx.waitUntil()`, щоб уникнути повторних запитів Telegram.
+- Відповідає на оригінальне повідомлення та розділяє розпізнаний текст, який
+  перевищує ліміт Telegram у 4096 символів.
 
-## Prerequisites
+## Передумови
 
-- A Cloudflare account with Workers AI enabled.
-- Node.js and npm.
-- A Telegram bot token created by messaging [@BotFather](https://t.me/BotFather)
-  and running `/newbot`.
+- Обліковий запис Cloudflare з увімкненим Workers AI.
+- Node.js і npm.
+- Токен Telegram-бота, створений через повідомлення
+  [@BotFather](https://t.me/BotFather) і команду `/newbot`.
 
-## Setup
+## Налаштування
 
-Install dependencies:
+Встановіть залежності:
 
 ```sh
 npm install
 ```
 
-The Workers AI binding is configured in `wrangler.jsonc`:
+Прив'язку Workers AI налаштовано у `wrangler.jsonc`:
 
 ```jsonc
 "ai": {
@@ -43,7 +44,7 @@ The Workers AI binding is configured in `wrangler.jsonc`:
 }
 ```
 
-Authenticate Wrangler and add the required secrets:
+Авторизуйте Wrangler і додайте необхідні секрети:
 
 ```sh
 npx wrangler login
@@ -51,178 +52,189 @@ npx wrangler secret put TELEGRAM_BOT_TOKEN
 npx wrangler secret put WEBHOOK_SECRET
 ```
 
-Use a long random value for `WEBHOOK_SECRET`. It becomes part of the webhook
-URL and prevents callers who do not know it from invoking the bot endpoint.
-Secrets are not stored in `wrangler.jsonc`.
+Використайте довге випадкове значення для `WEBHOOK_SECRET`. Воно стане частиною
+URL вебхука та не дозволить викликати кінцеву точку бота тим, хто його не знає.
+Секрети не зберігаються у `wrangler.jsonc`.
 
-Non-secret settings live under `vars` in `wrangler.jsonc`:
+Несекретні налаштування розміщено в `vars` у `wrangler.jsonc`:
 
-| Variable | Default | Purpose |
+| Змінна | Типове значення | Призначення |
 | --- | --- | --- |
-| `ALLOW_PRIVATE_CHATS` | `false` | Ignore unlisted private chats when false |
-| `ALLOWED_CHAT_IDS` | empty | Comma-separated allowed Telegram chat IDs; empty allows all |
-| `DAILY_TRANSCRIPTION_SECONDS` | `6000` | Daily budget in seconds, reset at 00:00 UTC |
-| `DEFAULT_LANGUAGE` | `uk` | Preferred ISO 639-1 language; empty means auto-detect |
-| `MAX_FILE_SIZE_BYTES` | `20000000` | Maximum downloaded audio size |
-| `MAX_DURATION_SECONDS` | `300` | Maximum Telegram-reported duration |
-| `WHISPER_MODEL` | `@cf/openai/whisper-large-v3-turbo` | Workers AI model |
+| `ALLOW_PRIVATE_CHATS` | `false` | Ігнорувати приватні чати поза списком дозволених, якщо `false` |
+| `ALLOWED_CHAT_IDS` | порожньо | Розділені комами дозволені ID чатів Telegram; порожнє значення дозволяє всі |
+| `DAILY_TRANSCRIPTION_SECONDS` | `6000` | Денний ліміт у секундах зі скиданням о 00:00 UTC |
+| `DEFAULT_LANGUAGE` | `uk` | Бажана мова ISO 639-1; порожнє значення вмикає автовизначення |
+| `MAX_FILE_SIZE_BYTES` | `20000000` | Максимальний розмір завантаженого аудіо |
+| `MAX_DURATION_SECONDS` | `300` | Максимальна тривалість за даними Telegram |
+| `WHISPER_MODEL` | `@cf/openai/whisper-large-v3-turbo` | Модель Workers AI |
 
-Supported model values are `@cf/openai/whisper-large-v3-turbo` and
-`@cf/openai/whisper`. The default large-v3-turbo model accepts base64 audio and
-receives `DEFAULT_LANGUAGE=uk`, which prevents Ukrainian speech from being
-auto-detected as Russian. The older Whisper model accepts an audio byte array
-but does not accept a language parameter, so selecting it always enables
-language auto-detection. Both requests transcribe; neither translates.
+Підтримувані значення моделі: `@cf/openai/whisper-large-v3-turbo` і
+`@cf/openai/whisper`. Типова модель large-v3-turbo приймає аудіо у форматі
+base64 та отримує `DEFAULT_LANGUAGE=uk`, що запобігає помилковому визначенню
+української мови як російської. Старіша модель Whisper приймає масив байтів
+аудіо, але не приймає параметр мови, тому при її виборі завжди вмикається
+автовизначення мови. Обидва запити розпізнають мовлення, а не перекладають його.
 
-Cloudflare currently marks `@cf/openai/whisper-large-v3-turbo` as deprecated,
-so confirm its availability before selecting it.
+Cloudflare наразі позначає `@cf/openai/whisper-large-v3-turbo` як застарілу
+модель, тому перевірте її доступність перед вибором.
 
-## Usage Safeguards
+## Захист від надмірного використання
 
-The default daily budget is 6,000 seconds, or 100 minutes. This leaves roughly
-114 minutes of headroom below the current estimated free allocation for
-`@cf/openai/whisper-large-v3-turbo`. The bot reserves each message's
-Telegram-reported duration before calling Workers AI. Failed transcription
-attempts remain counted intentionally, favoring a conservative budget.
+Типовий денний ліміт становить 6 000 секунд, або 100 хвилин. Це залишає приблизно
+114 хвилин запасу до поточного орієнтовного безкоштовного ліміту для
+`@cf/openai/whisper-large-v3-turbo`. Перед викликом Workers AI бот резервує
+тривалість кожного повідомлення за даними Telegram. Невдалі спроби розпізнавання
+навмисно залишаються врахованими для консервативного використання ліміту.
 
-The budget is enforced atomically by the `DailyBudget` SQLite-backed Durable
-Object and resets at 00:00 UTC. This protects this bot's usage. It cannot
-account for Workers AI usage from other Workers in the same Cloudflare account,
-so leave additional headroom if the account runs other AI workloads.
+Ліміт атомарно контролює `DailyBudget`, Durable Object на основі SQLite, і він
+скидається о 00:00 UTC. Це захищає використання саме цього бота. Він не може
+враховувати використання Workers AI іншими Workers у тому самому обліковому
+записі Cloudflare, тому залишайте додатковий запас, якщо в обліковому записі
+працюють інші завдання AI.
 
-Allowed chats can send `/stats` to see the bot's reserved minutes used,
-remaining minutes, daily limit, and UTC reset time. The command is ignored in
-non-allowlisted chats and does not invoke Workers AI.
+У дозволених чатах можна надіслати `/stats`, щоб переглянути використані та
+залишкові зарезервовані хвилини, денний ліміт і час скидання за UTC. У чатах
+поза списком дозволених команда ігнорується та не викликає Workers AI.
 
-To restrict the bot to specific users, personal chats, groups, or supergroups,
-set their numeric IDs in `wrangler.jsonc`:
+Щоб обмежити бота конкретними користувачами, приватними чатами, групами або
+супергрупами, укажіть їхні числові ID у `wrangler.jsonc`:
 
 ```jsonc
 "ALLOWED_CHAT_IDS": "123456789,-1001234567890"
 ```
 
-Positive IDs are usually private chats. Group and supergroup IDs are usually
-negative. The easiest way to discover one is to send `/chatid` in that personal
-chat or group. The bot replies with its numeric ID. This command works for every
-user, even when the chat is not allowlisted or private chats are disabled.
+Додатні ID зазвичай належать приватним чатам. ID груп і супергруп зазвичай
+від'ємні. Найпростіший спосіб дізнатися ID — надіслати `/chatid` у відповідному
+приватному чаті або групі. Бот відповість числовим ID. Ця команда працює для
+кожного користувача, навіть якщо чат не входить до списку дозволених або
+приватні чати вимкнено.
 
-With Guest Mode enabled in BotFather, an allowlisted user can mention the bot
-while replying to a voice or audio message in any supported chat. Guest
-requests are authorized using the tagging user's positive ID, not the current
-chat ID. Users who are not allowlisted receive an access-denied guest reply,
-and their audio is never downloaded or transcribed. Telegram allows only one
-reply to a guest query, so guest transcriptions longer than 4096 characters are
-truncated to the first message-sized chunk.
+Коли в BotFather увімкнено гостьовий режим, дозволений користувач може згадати
+бота у відповіді на голосове або аудіоповідомлення в будь-якому підтримуваному
+чаті. Гостьові запити авторизуються за додатним ID користувача, який згадав
+бота, а не за ID поточного чату. Користувачі поза списком дозволених отримують
+відповідь про відмову в доступі, а їхнє аудіо ніколи не завантажується та не
+розпізнається. Telegram дозволяє лише одну відповідь на гостьовий запит, тому
+розпізнаний текст довший за 4096 символів обрізається до першої частини розміром
+з одне повідомлення.
 
-After enabling Guest Mode, send `/setupguest` from an allowlisted chat once.
-This refreshes the existing webhook subscription so Telegram delivers both
-normal `message` and the newer `guest_message` update types. The command reuses
-the secret webhook URL from the incoming command and does not expose it. It
-also reports whether Telegram's `getMe` API confirms that Guest Mode is enabled
-for the bot. Send `/gueststatus` from an allowlisted chat to retrieve the same
-diagnostic status without changing the webhook.
+Після ввімкнення гостьового режиму один раз надішліть `/setupguest` із
+дозволеного чату. Команда оновлює наявну підписку вебхука, щоб Telegram
+надсилав як звичайні оновлення `message`, так і новіші `guest_message`. Вона
+повторно використовує секретний URL вебхука з вхідної команди та не розкриває
+його. Команда також повідомляє, чи підтверджує API Telegram `getMe`, що для бота
+увімкнено гостьовий режим. Надішліть `/gueststatus` із дозволеного чату, щоб
+отримати той самий діагностичний статус без зміни вебхука.
 
-Set `ALLOW_PRIVATE_CHATS` to `false` to silently ignore every personal message
-from users whose positive private chat ID is not in `ALLOWED_CHAT_IDS`.
-Explicitly allowlisted private chats remain usable. `/chatid` remains available
-to every user.
+Установіть `ALLOW_PRIVATE_CHATS` у `false`, щоб без відповіді ігнорувати кожне
+приватне повідомлення від користувачів, чиї додатні ID приватних чатів не
+входять до `ALLOWED_CHAT_IDS`. Явно дозволені приватні чати залишаться
+доступними. Команда `/chatid` залишається доступною кожному користувачеві, а
+команда `/start` відповідає повідомленням про відмову в доступі з посиланням на
+репозиторій.
 
-You can also temporarily leave `ALLOWED_CHAT_IDS` empty, send a voice message
-in the chat, then inspect structured Worker logs:
+Також можна тимчасово залишити `ALLOWED_CHAT_IDS` порожнім, надіслати голосове
+повідомлення в чаті, а потім переглянути структуровані журнали Worker:
 
 ```sh
 npx wrangler tail
 ```
 
-After adding the IDs, deploy again. Voice/audio messages from non-allowlisted
-chats receive an access-denied reply without invoking Workers AI. Other
-messages from those chats are silently ignored and logged.
+Після додавання ID повторно розгорніть Worker. Голосові та аудіоповідомлення з
+чатів поза списком дозволених отримуватимуть відповідь про відмову в доступі
+без виклику Workers AI. Команда `/start` також отримуватиме таку відповідь.
+Інші повідомлення з таких чатів без відповіді ігноруватимуться та
+записуватимуться до журналу.
 
-## Verify And Deploy
+## Перевірка та розгортання
 
-Generate binding types, type-check, and perform a Wrangler dry run:
+Згенеруйте типи прив'язок, перевірте типи та виконайте пробне розгортання
+Wrangler:
 
 ```sh
 npm run verify
 ```
 
-Deploy:
+Розгорніть Worker:
 
 ```sh
 npm run deploy
 ```
 
-The health check is available at:
+Перевірка стану доступна за адресою:
 
 ```txt
-https://<worker-domain>/
+https://<домен-worker>/
 ```
 
-It returns `Telegram transcription bot is running`.
+Вона повертає `Бот розпізнавання голосових повідомлень Telegram працює`.
 
-## Set The Telegram Webhook
+## Налаштування вебхука Telegram
 
-After deploying, configure Telegram to send updates to the secret endpoint:
+Після розгортання налаштуйте Telegram для надсилання оновлень до секретної
+кінцевої точки:
 
 ```sh
-curl "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook?url=https://<worker-domain>/telegram/<WEBHOOK_SECRET>"
+curl "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook?url=https://<домен-worker>/telegram/<WEBHOOK_SECRET>"
 ```
 
-Do not commit or share the resulting URL because it contains the webhook
-secret. Alternatively, after this initial webhook is configured, the
-allowlisted `/setupguest` command can refresh its update subscription.
+Не додавайте отриманий URL до коміту та не поширюйте його, оскільки він містить
+секрет вебхука. Після початкового налаштування вебхука дозволена команда
+`/setupguest` також може оновити його підписку на типи оновлень.
 
-## Enable Group Chats
+## Увімкнення групових чатів
 
-Telegram enables Group Privacy Mode for bots by default. With privacy mode
-enabled, Telegram does not send ordinary group voice messages to the bot's
-webhook, so the Worker cannot transcribe them.
+Telegram типово вмикає для ботів режим приватності груп. Коли цей режим
+увімкнений, Telegram не надсилає звичайні групові голосові повідомлення до
+вебхука бота, тому Worker не може їх розпізнати.
 
-To receive every voice message in a group:
+Щоб отримувати кожне голосове повідомлення у групі:
 
-1. Open [@BotFather](https://t.me/BotFather).
-2. Send `/setprivacy`.
-3. Select this bot.
-4. Select **Disable**.
-5. Remove the bot from each existing group and add it again. Telegram requires
-   re-adding the bot for the privacy change to take effect.
+1. Відкрийте [@BotFather](https://t.me/BotFather).
+2. Надішліть `/setprivacy`.
+3. Виберіть цього бота.
+4. Виберіть **Disable**.
+5. Видаліть бота з кожної наявної групи та додайте його знову. Telegram вимагає
+   повторно додати бота, щоб зміна режиму приватності набула чинності.
 
-Alternatively, promote the bot to a group administrator. Telegram delivers all
-group messages to bot administrators even when Group Privacy Mode is enabled.
-The bot does not need any additional administrator permissions to transcribe
-messages.
+Альтернативний варіант — призначити бота адміністратором групи. Telegram
+надсилає адміністраторам-ботам усі повідомлення групи, навіть коли режим
+приватності груп увімкнено. Для розпізнавання повідомлень бот не потребує
+жодних додаткових прав адміністратора.
 
-With privacy mode still enabled, the bot receives only limited group messages,
-including commands explicitly addressed to it and messages that reply to one
-of its messages.
+Коли режим приватності залишається увімкненим, бот отримує лише обмежений набір
+групових повідомлень, зокрема команди, явно адресовані йому, та відповіді на
+його повідомлення.
 
-## Test
+## Тестування
 
-1. Send `/start` in a private chat. The bot should ask for a voice message.
-2. Send a short Ukrainian voice message.
-3. Confirm the bot replies to it with `📝 <transcribed text>`.
-4. After completing **Enable Group Chats**, send a voice message in a group and
-   confirm the bot replies with text.
-5. Send a non-voice message in a group and confirm the bot stays silent.
-6. In a chat where the bot is not a member, reply to a voice message, mention
-   the bot, and confirm an allowlisted user receives the transcription.
+1. Надішліть `/start` у приватному чаті. Бот має попросити голосове повідомлення.
+2. Надішліть коротке голосове повідомлення українською.
+3. Переконайтеся, що бот відповідає на нього текстом `📝 <розпізнаний текст>`.
+4. Після виконання розділу **Увімкнення групових чатів** надішліть голосове
+   повідомлення у групі та переконайтеся, що бот відповідає текстом.
+5. Надішліть неголосове повідомлення у групі та переконайтеся, що бот мовчить.
+6. У чаті, учасником якого бот не є, дайте відповідь на голосове повідомлення,
+   згадайте бота та переконайтеся, що дозволений користувач отримує розпізнаний
+   текст.
 
-For local development, create an ignored `.dev.vars` file with
-`TELEGRAM_BOT_TOKEN` and `WEBHOOK_SECRET`, then run `npm run dev`. Workers AI
-uses your Cloudflare account and incurs usage even during local development.
+Для локальної розробки створіть ігнорований файл `.dev.vars` зі значеннями
+`TELEGRAM_BOT_TOKEN` і `WEBHOOK_SECRET`, а потім виконайте `npm run dev`.
+Workers AI використовує ваш обліковий запис Cloudflare та враховує використання
+навіть під час локальної розробки.
 
-## Audio Compatibility
+## Сумісність аудіо
 
-Telegram voice messages are normally `.ogg` files containing Opus audio. This
-Worker intentionally sends those bytes directly to Workers AI and does not run
-`ffmpeg` or convert audio locally.
+Голосові повідомлення Telegram зазвичай є файлами `.ogg` з аудіо Opus. Цей
+Worker навмисно надсилає ці байти безпосередньо до Workers AI, не запускає
+`ffmpeg` і не перетворює аудіо локально.
 
-If Workers AI rejects a particular Telegram `.ogg`/Opus file, the bot sends a
-temporary-error reply and logs the model error. A future version would need an
-external audio-conversion service for those files; that is intentionally
-outside this Workers-only MVP.
+Якщо Workers AI відхиляє певний файл Telegram `.ogg`/Opus, бот надсилає
+повідомлення про тимчасову помилку та записує помилку моделі до журналу. Для
+обробки таких файлів майбутній версії знадобиться зовнішній сервіс перетворення
+аудіо; це навмисно не входить до цього MVP лише на основі Workers.
 
-The optional `@cf/openai/whisper` model requires audio to be expanded into a
-JavaScript number array. Near the configured 20 MB limit this can approach the
-Worker's memory limit. The default `@cf/openai/whisper-large-v3-turbo` model
-uses base64 instead.
+Необов'язкова модель `@cf/openai/whisper` потребує розгортання аудіо в масив
+чисел JavaScript. Поблизу налаштованого ліміту в 20 МБ це може наблизити
+використання пам'яті до ліміту Worker. Типова модель
+`@cf/openai/whisper-large-v3-turbo` натомість використовує base64.

@@ -2,21 +2,21 @@ import { Buffer } from "node:buffer";
 import { DurableObject } from "cloudflare:workers";
 
 const PRIVATE_CHAT_HELP =
-  "Send me a voice message and I’ll convert it to text.";
+  "Надішліть мені голосове повідомлення, і я перетворю його на текст.";
 const TOO_LARGE_MESSAGE =
-  "This voice message is too large to transcribe. Please send a shorter one.";
+  "Це голосове повідомлення завелике для розпізнавання. Будь ласка, надішліть коротше.";
 const EMPTY_TRANSCRIPTION_MESSAGE =
-  "I couldn’t recognize speech in this voice message.";
+  "Не вдалося розпізнати текст в цьому голосовому повідомленні.";
 const TEMPORARY_ERROR_MESSAGE =
-  "Sorry, I couldn’t transcribe this voice message. Please try again.";
+  "На жаль, не вдалося розпізнати це голосове повідомлення. Будь ласка, спробуйте ще раз.";
 const DAILY_LIMIT_MESSAGE =
-  "The daily transcription limit has been reached. Please try again after 00:00 UTC.";
+  "Денний ліміт розпізнавання вичерпано. Будь ласка, спробуйте ще раз після 00:00 UTC.";
 const NOT_ALLOWED_MESSAGE =
-  "This chat is not allowed to use voice transcription in this bot. Feel free to deploy your own: https://github.com/BUSHA/tg-voice-to-text-cf";
+  "Цьому чату не дозволено використовувати розпізнавання голосу. Ви можете розгорнути власного бота: https://github.com/BUSHA/tg-voice-to-text-cf";
 const GUEST_NOT_ALLOWED_MESSAGE =
-  "You are not allowed to use voice transcription in this bot. Feel free to deploy your own: https://github.com/BUSHA/tg-voice-to-text-cf";
+  "Вам не дозволено використовувати розпізнавання голосу. Ви можете розгорнути власного бота: https://github.com/BUSHA/tg-voice-to-text-cf";
 const GUEST_HELP_MESSAGE =
-  "Reply to a voice or audio message when mentioning me, and I’ll transcribe it.";
+  "Згадайте мене у відповіді на голосове або аудіоповідомлення, і я розпізнаю його.";
 const TELEGRAM_MESSAGE_LIMIT = 4096;
 
 interface TelegramUpdate {
@@ -108,23 +108,23 @@ export default {
     const url = new URL(request.url);
 
     if (request.method === "GET" && url.pathname === "/") {
-      return new Response("Telegram transcription bot is running");
+      return new Response("Бот розпізнавання голосових повідомлень Telegram працює");
     }
 
     const webhookSecret = getPathSecret(url.pathname);
     if (request.method !== "POST" || webhookSecret === undefined) {
-      return new Response("Not found", { status: 404 });
+      return new Response("Не знайдено", { status: 404 });
     }
 
     if (webhookSecret !== env.WEBHOOK_SECRET) {
-      return new Response("Not found", { status: 404 });
+      return new Response("Не знайдено", { status: 404 });
     }
 
     let update: TelegramUpdate;
     try {
       update = await request.json<TelegramUpdate>();
     } catch (error) {
-      logError("Invalid Telegram webhook JSON", error);
+      logError("Некоректний JSON вебхука Telegram", error);
       return new Response("OK");
     }
 
@@ -152,23 +152,24 @@ async function handleUpdate(
     await safelySendMessage(
       env,
       message.chat.id,
-      `Chat ID: ${message.chat.id}`,
+      `ID чату: ${message.chat.id}`,
       message.message_id,
     );
     return;
   }
 
   const config = getRuntimeConfig(env);
+  const isStartCommand = /^\/start(?:@\w+)?(?:\s|$)/.test(message.text ?? "");
   if (
     message.chat.type === "private" &&
     !config.allowPrivateChats &&
     !config.allowedChatIds.has(String(message.chat.id))
   ) {
     console.warn({
-      message: "Ignored update from a private chat",
+      message: "Оновлення з приватного чату проігноровано",
       chatId: message.chat.id,
     });
-    if (message.voice || message.audio) {
+    if (isStartCommand || message.voice || message.audio) {
       await safelySendMessage(env, message.chat.id, NOT_ALLOWED_MESSAGE, message.message_id);
     }
     return;
@@ -176,11 +177,11 @@ async function handleUpdate(
 
   if (!isAllowedChat(config.allowedChatIds, message.chat.id)) {
     console.warn({
-      message: "Ignored update from a chat that is not allowlisted",
+      message: "Оновлення з чату, якого немає в списку дозволених, проігноровано",
       chatId: message.chat.id,
       chatType: message.chat.type,
     });
-    if (message.voice || message.audio) {
+    if (isStartCommand || message.voice || message.audio) {
       await safelySendMessage(env, message.chat.id, NOT_ALLOWED_MESSAGE, message.message_id);
     }
     return;
@@ -191,7 +192,7 @@ async function handleUpdate(
       const stats = await getDailyBudgetStats(env, config.dailyTranscriptionSeconds);
       await sendMessage(env, message.chat.id, formatBudgetStats(stats), message.message_id);
     } catch (error) {
-      logError("Failed to retrieve daily budget stats", error);
+      logError("Не вдалося отримати статистику денного ліміту", error);
       await safelySendMessage(env, message.chat.id, TEMPORARY_ERROR_MESSAGE, message.message_id);
     }
     return;
@@ -208,7 +209,7 @@ async function handleUpdate(
         message.message_id,
       );
     } catch (error) {
-      logError("Failed to enable Telegram guest updates", error);
+      logError("Не вдалося ввімкнути гостьові оновлення Telegram", error);
       await safelySendMessage(env, message.chat.id, TEMPORARY_ERROR_MESSAGE, message.message_id);
     }
     return;
@@ -224,7 +225,7 @@ async function handleUpdate(
         message.message_id,
       );
     } catch (error) {
-      logError("Failed to retrieve Telegram guest status", error);
+      logError("Не вдалося отримати статус гостьового режиму Telegram", error);
       await safelySendMessage(env, message.chat.id, TEMPORARY_ERROR_MESSAGE, message.message_id);
     }
     return;
@@ -239,7 +240,7 @@ async function handleUpdate(
   }
 
   console.info({
-    message: "Received transcribable Telegram message",
+    message: "Отримано повідомлення Telegram для розпізнавання",
     chatId: message.chat.id,
     chatType: message.chat.type,
     durationSeconds: media.duration,
@@ -267,7 +268,7 @@ async function handleUpdate(
 
     const file = await getTelegramFile(env, media.file_id);
     if (!file.file_path) {
-      throw new TelegramApiError("Telegram getFile response did not include file_path");
+      throw new TelegramApiError("Відповідь Telegram getFile не містить file_path");
     }
 
     const audio = await downloadTelegramFile(env, file.file_path, config.maxFileSizeBytes);
@@ -285,7 +286,7 @@ async function handleUpdate(
       return;
     }
 
-    logError("Voice transcription failed", error);
+    logError("Не вдалося розпізнати голосове повідомлення", error);
     await safelySendMessage(env, message.chat.id, TEMPORARY_ERROR_MESSAGE, message.message_id);
   }
 }
@@ -303,7 +304,7 @@ async function handleGuestMessage(
   const callerId = message.from?.id;
   if (callerId === undefined || !isAllowedChat(config.allowedChatIds, callerId)) {
     console.warn({
-      message: "Rejected guest query from a user that is not allowlisted",
+      message: "Відхилено гостьовий запит від користувача, якого немає в списку дозволених",
       callerId,
       chatId: message.chat.id,
       chatType: message.chat.type,
@@ -319,7 +320,7 @@ async function handleGuestMessage(
   }
 
   console.info({
-    message: "Received transcribable Telegram guest query",
+    message: "Отримано гостьовий запит Telegram для розпізнавання",
     callerId,
     chatId: message.chat.id,
     chatType: message.chat.type,
@@ -348,7 +349,7 @@ async function handleGuestMessage(
 
     const file = await getTelegramFile(env, media.file_id);
     if (!file.file_path) {
-      throw new TelegramApiError("Telegram getFile response did not include file_path");
+      throw new TelegramApiError("Відповідь Telegram getFile не містить file_path");
     }
 
     const audio = await downloadTelegramFile(env, file.file_path, config.maxFileSizeBytes);
@@ -364,7 +365,7 @@ async function handleGuestMessage(
       return;
     }
 
-    logError("Guest voice transcription failed", error);
+    logError("Не вдалося розпізнати голосове повідомлення з гостьового запиту", error);
     await safelyAnswerGuestQuery(env, guestQueryId, TEMPORARY_ERROR_MESSAGE);
   }
 }
@@ -432,17 +433,17 @@ async function getDailyBudgetStats(
 
 function formatBudgetStats(stats: BudgetStats): string {
   return [
-    `Daily transcription usage (${stats.utcDate} UTC):`,
-    `Used: ${formatMinutes(stats.reservedSeconds)}`,
-    `Remaining: ${formatMinutes(stats.remainingSeconds)}`,
-    `Limit: ${formatMinutes(stats.limitSeconds)}`,
-    "Resets at 00:00 UTC.",
+    `Денне використання розпізнавання (${stats.utcDate} UTC):`,
+    `Використано: ${formatMinutes(stats.reservedSeconds)}`,
+    `Залишилося: ${formatMinutes(stats.remainingSeconds)}`,
+    `Ліміт: ${formatMinutes(stats.limitSeconds)}`,
+    "Скидання о 00:00 UTC.",
   ].join("\n");
 }
 
 function formatMinutes(seconds: number): string {
   const minutes = seconds / 60;
-  return `${Number.isInteger(minutes) ? minutes : minutes.toFixed(1)} minutes`;
+  return `${Number.isInteger(minutes) ? minutes : minutes.toFixed(1)} хв`;
 }
 
 function getUtcDate(now = new Date()): string {
@@ -480,12 +481,12 @@ async function telegramApi<T>(
   try {
     body = await response.json<TelegramApiResponse<T>>();
   } catch {
-    throw new TelegramApiError(`Telegram ${method} returned invalid JSON`, response.status);
+    throw new TelegramApiError(`Telegram ${method} повернув некоректний JSON`, response.status);
   }
 
   if (!response.ok || !body.ok || body.result === undefined) {
     throw new TelegramApiError(
-      `Telegram ${method} failed: ${body.description ?? response.statusText}`,
+      `Помилка Telegram ${method}: ${body.description ?? response.statusText}`,
       response.status,
     );
   }
@@ -523,7 +524,7 @@ async function safelySendMessage(
   try {
     await sendMessage(env, chatId, text, replyToMessageId);
   } catch (error) {
-    logError("Failed to send Telegram message", error);
+    logError("Не вдалося надіслати повідомлення Telegram", error);
   }
 }
 
@@ -551,17 +552,17 @@ function formatTelegramGuestStatus({
   bot: TelegramBot;
   webhook: TelegramWebhookInfo;
 }): string {
-  const allowedUpdates = webhook.allowed_updates?.join(", ") || "all default updates";
+  const allowedUpdates = webhook.allowed_updates?.join(", ") || "усі типові оновлення";
   return [
-    `Bot: @${bot.username ?? "unknown"}`,
-    `Guest Mode capability: ${bot.supports_guest_queries === true ? "enabled" : "NOT enabled"}`,
-    `Webhook guest_message subscription: ${
-      webhook.allowed_updates?.includes("guest_message") ? "enabled" : "NOT enabled"
+    `Бот: @${bot.username ?? "невідомо"}`,
+    `Підтримка гостьового режиму: ${bot.supports_guest_queries === true ? "увімкнено" : "НЕ ввімкнено"}`,
+    `Підписка вебхука на guest_message: ${
+      webhook.allowed_updates?.includes("guest_message") ? "увімкнено" : "НЕ ввімкнено"
     }`,
-    `Webhook updates: ${allowedUpdates}`,
-    `Pending updates: ${webhook.pending_update_count}`,
+    `Оновлення вебхука: ${allowedUpdates}`,
+    `Оновлень в очікуванні: ${webhook.pending_update_count}`,
     ...(webhook.last_error_message
-      ? [`Last webhook error: ${webhook.last_error_message}`]
+      ? [`Остання помилка вебхука: ${webhook.last_error_message}`]
       : []),
   ].join("\n");
 }
@@ -577,7 +578,7 @@ async function answerGuestQuery(
     result: {
       type: "article",
       id: "voice-transcription",
-      title: "Voice transcription",
+      title: "Розпізнавання голосу",
       input_message_content: {
         message_text: messageText,
       },
@@ -593,7 +594,7 @@ async function safelyAnswerGuestQuery(
   try {
     await answerGuestQuery(env, guestQueryId, text);
   } catch (error) {
-    logError("Failed to answer Telegram guest query", error);
+    logError("Не вдалося відповісти на гостьовий запит Telegram", error);
   }
 }
 
@@ -610,17 +611,17 @@ async function downloadTelegramFile(
     `https://api.telegram.org/file/bot${env.TELEGRAM_BOT_TOKEN}/${filePath}`,
   );
   if (!response.ok) {
-    throw new TelegramApiError("Telegram file download failed", response.status);
+    throw new TelegramApiError("Не вдалося завантажити файл Telegram", response.status);
   }
 
   const contentLength = Number(response.headers.get("content-length"));
   if (Number.isFinite(contentLength) && contentLength > maxFileSizeBytes) {
-    throw new RangeError("Telegram file exceeds configured maximum size");
+    throw new RangeError("Файл Telegram перевищує налаштований максимальний розмір");
   }
 
   const audio = await response.arrayBuffer();
   if (audio.byteLength > maxFileSizeBytes) {
-    throw new RangeError("Telegram file exceeds configured maximum size");
+    throw new RangeError("Файл Telegram перевищує налаштований максимальний розмір");
   }
 
   return audio;
@@ -641,7 +642,7 @@ async function transcribeAudio(
   }
 
   if (config.model !== "@cf/openai/whisper") {
-    throw new Error(`Unsupported WHISPER_MODEL: ${config.model}`);
+    throw new Error(`Непідтримувана модель WHISPER_MODEL: ${config.model}`);
   }
 
   const result = await env.AI.run("@cf/openai/whisper", {
